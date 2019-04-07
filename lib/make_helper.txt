@@ -1,0 +1,10 @@
+If the following appears when running "make":
+OSError: The nvcc binary could not be located in your $PATH. Either add it to your path, or set $CUDAHOME
+
+Do:
+export CUDA_HOME=/usr/local/cuda-9.0
+export LD_LIBRARY_PATH=${CUDA_HOME}/lib64
+PATH=${CUDA_HOME}/bin:${PATH}
+export PATH
+
+and retry "make"

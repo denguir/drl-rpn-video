@@ -1,0 +1,30 @@
+EXP_DIR: vgg16_drl_rpn
+DIMS_BASE: 512
+DRL_RPN:
+  # Use class-agnostic NMS together with drl-RPN?
+  USE_AGNO: False
+  # Setting TOPK_OBJNESS: 5 #increases speed while not losing much acc.
+  # Setting it to 0 --> Use all k anchors
+  TOPK_OBJNESS: 0
+DRL_RPN_TRAIN:
+  # Exploration-accuracy trade-off parameters to sample in training
+  BETAS: [0.05, 0.35]
+  POST_BETAS: [0.05, 0.35]
+DRL_RPN_TEST:
+  # May be set at test-time (low --> more accurate, slower; high --> opposite)
+  BETA: 0.05
+  # Visualize drl-RPN search trajectories?
+  DO_VISUALIZE: True
+TRAIN:
+  HAS_RPN: True
+  IMS_PER_BATCH: 1
+  RPN_BATCHSIZE: 128
+  PROPOSAL_METHOD: gt
+  BG_THRESH_LO: 0.0
+  DISPLAY: 50
+  BATCH_SIZE: 128
+  DOUBLE_BIAS: False
+  SNAPSHOT_PREFIX: vgg16_drl_rpn
+TEST:
+  HAS_RPN: True
+POOLING_MODE: crop

@@ -1,0 +1,8 @@
+*.pyc
+*.log
+*.jpg
+*.pkl
+*.nfs*
+output/
+data/
+drl-rpn-voc2007-2012-trainval/
