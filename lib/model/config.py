@@ -62,7 +62,7 @@ __C.TRAIN.SUMMARY_INTERVAL = 180
 
 # Scale to use during training (can list multiple scales)
 # The scale is the pixel size of an image's shortest side
-__C.TRAIN.SCALES = (600,)
+__C.TRAIN.SCALES = (600,) 
 
 # Max pixel size of the longest side of a scaled input image
 __C.TRAIN.MAX_SIZE = 1000
@@ -71,10 +71,7 @@ __C.TRAIN.MAX_SIZE = 1000
 __C.TRAIN.IMS_PER_BATCH = 1
 
 # Minibatch size (number of regions of interest [ROIs])
-__C.TRAIN.BATCH_SIZE = 128
-
-# Number of frames in a Sequence:
-__C.TRAIN.SEQ_LENGTH = 4
+__C.TRAIN.BATCH_SIZE = 128 
 
 # Fraction of minibatch that is labeled foreground (i.e. class > 0)
 __C.TRAIN.FG_FRACTION = 0.25
@@ -205,7 +202,7 @@ __C.TEST.RPN_POST_NMS_TOP_N = 300
 
 # Testing mode, default to be 'nms', 'top' is slower but better
 # See report for details
-__C.TEST.MODE = 'top'
+__C.TEST.MODE = 'nms'
 
 # Only useful when TEST.MODE is 'top', specifies the number of top proposals
 # to select
@@ -262,7 +259,7 @@ __C.DRL_RPN_TEST.RANDOM_DONE = False
 __C.DRL_RPN_TEST.RANDOM_FIX = False
 
 # Fixation penalty beta
-__C.DRL_RPN_TEST.BETA = 0.10
+__C.DRL_RPN_TEST.BETA = 0.1
 
 # Run a certain number of fixations in drl-RPN?
 __C.DRL_RPN_TEST.NBR_FIX = 0 # 0 = automatic stopping
@@ -320,6 +317,9 @@ __C.ROOT_DIR = osp.abspath(osp.join(osp.dirname(__file__), '..', '..'))
 # Data directory
 __C.DATA_DIR = osp.abspath(osp.join(__C.ROOT_DIR, 'data'))
 
+# Visualization directory
+__C.VIS_DIR = osp.abspath(osp.join(__C.ROOT_DIR, 'img-out'))
+
 # Name (or path to) the matlab executable
 __C.MATLAB = 'matlab'
 
@@ -361,9 +361,6 @@ __C.DIMS_TOT = __C.DIMS_NONHIST + __C.NBR_CLASSES
 
 # Number of filters for the RPN layer
 __C.RPN_CHANNELS = 512
-
-# Number of video frames
-__C.DIMS_TIME = 2
 
 # If using COCO-trained 81-class detector on PASCAL, below is the mapping
 # to corresponding 21 PASCAL-classes

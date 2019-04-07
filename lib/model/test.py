@@ -68,12 +68,11 @@ def test_net(sess, net, imdb, weights_filename, max_per_image=100, thresh=0.00):
 
   # Create StatCollector (tracks various drl-RPN test statistics)
   stat_strings = ['#fix/img', 'exploration']
-  #sc = StatCollector(nbr_images, stat_strings, False)
+  sc = StatCollector(nbr_images, stat_strings, False)
 
   # Try getting gt-info if available
   try:
     gt_roidb = imdb.gt_roidb()
-    print(gt_roidb[0])
   except:
     gt_roidb = None
 
@@ -84,7 +83,7 @@ def test_net(sess, net, imdb, weights_filename, max_per_image=100, thresh=0.00):
   # but having nbr_ims_eval = nbr_images and start_idx = 0 --> regular testing!
   nbr_ims_eval = nbr_images
   start_idx = 0 
-  end_idx = 4 #start_idx + nbr_ims_eval
+  end_idx = start_idx + nbr_ims_eval
 
   # Test drl-RPN on the test images
   for i in range(start_idx, end_idx):
@@ -97,7 +96,12 @@ def test_net(sess, net, imdb, weights_filename, max_per_image=100, thresh=0.00):
     if gt_roidb is None:
       nbr_gts = None
     else:
-      nbr_gts = gt_roidb[i]['boxes'].shape[0]
+      try:
+        nbr_gts = gt_roidb[i]['boxes'].shape[0]
+      except:
+        # if pickle transforms pascal voc keys in bytes
+        nbr_gts = gt_roidb[i][b'boxes'].shape[0]
+
 
     # Detect!
     im = cv2.imread(imdb.image_path_at(i))
@@ -107,8 +111,8 @@ def test_net(sess, net, imdb, weights_filename, max_per_image=100, thresh=0.00):
     _t['im_detect'].toc()
 
     # Update and print some stats
-    # sc.update(0, stats)
-    # sc.print_stats(False)
+    sc.update(0, stats)
+    sc.print_stats(False)
 
     _t['misc'].tic()
     # skip j = 0, because it's the background class
@@ -142,5 +146,4 @@ def test_net(sess, net, imdb, weights_filename, max_per_image=100, thresh=0.00):
     pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
 
   print('Evaluating detections')
-  print('Disabled for now')
-  # imdb.evaluate_detections(all_boxes, output_dir, start_idx, end_idx)
+  imdb.evaluate_detections(all_boxes, output_dir, start_idx, end_idx)

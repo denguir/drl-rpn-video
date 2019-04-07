@@ -293,7 +293,7 @@ class SolverWrapper(object):
     # We will handle the snapshots ourselves
     self.saver = tf.train.Saver(max_to_keep=100000)
 
-    # Initialize
+    # Initialize optimizee, RL loss and gradients
     self.net.init_rl_train(sess)
 
     # Setup initial learning rates
@@ -329,126 +329,121 @@ class SolverWrapper(object):
     while iter < max_iters:
 
       # Get training data, one batch at a time (assumes batch size 1)
-      seqBlobs = self.data_layer.forward()
-      # for each frame of a sequence, do the training
-      for fnum in range(cfg.TRAIN.SEQ_LENGTH):
-        blobs = {'data': np.expand_dims(seqBlobs['data'][fnum,:,:,:], axis=0),
-                'gt_boxes': seqBlobs['gt_boxes'][fnum],
-                'im_info': seqBlobs['im_info']}
+      blobs = self.data_layer.forward()
 
-        # Allows the possibility to start at arbitrary image, rather
-        # than always starting from first image in dataset. Useful if
-        # want to load parameters and keep going from there, rather
-        # than having those and encountering visited images again.
-        iter, max_iters, snapshot_add, do_continue \
-          = self._check_if_continue(iter, max_iters, snapshot_add)
-        if do_continue:
-          continue
+      # Allows the possibility to start at arbitrary image, rather
+      # than always starting from first image in dataset. Useful if
+      # want to load parameters and keep going from there, rather
+      # than having those and encountering visited images again.
+      iter, max_iters, snapshot_add, do_continue \
+        = self._check_if_continue(iter, max_iters, snapshot_add)
+      if do_continue:
+        continue
 
-        if not cfg.DRL_RPN_TRAIN.USE_POST:
+      if not cfg.DRL_RPN_TRAIN.USE_POST:
 
-          # Potentially update drl-RPN learning rate
-          if (iter + 1) % cfg.DRL_RPN_TRAIN.STEPSIZE == 0 and fnum == 0:
-            lr_rl *= cfg.DRL_RPN_TRAIN.GAMMA
+        # Potentially update drl-RPN learning rate
+        if (iter + 1) % cfg.DRL_RPN_TRAIN.STEPSIZE == 0:
+          lr_rl *= cfg.DRL_RPN_TRAIN.GAMMA
 
-          # Run drl-RPN in training mode
-          timers['run-drl-rpn'].tic()
-          stats = run_drl_rpn(sess, self.net, blobs, timers, mode='train',
-                              beta=beta, im_idx=None, extra_args=lr_rl)
-          timers['run-drl-rpn'].toc()
+        # Run drl-RPN in training mode
+        timers['run-drl-rpn'].tic()
+        stats = run_drl_rpn(sess, self.net, blobs, timers, mode='train',
+                            beta=beta, im_idx=None, extra_args=lr_rl)
+        timers['run-drl-rpn'].toc()
 
-          if (iter + 1) % cfg.DRL_RPN_TRAIN.BATCH_SIZE == 0 and fnum == 0:
-            print("\n##### DRL-RPN BATCH GRADIENT UPDATE - START ##### \n")
-            print('iter: %d / %d' % (iter + 1, max_iters))
-            print('lr-rl: %f' % lr_rl)
-            timers['train-drl-rpn'].tic()
-            self.net.train_drl_rpn(sess, lr_rl, sc, stats)
-            timers['train-drl-rpn'].toc()
-            sc.print_stats()
-            print('TIMINGS:')
-            print('runnn-drl-rpn: %.4f' % timers['run-drl-rpn'].get_avg())
-            print('train-drl-rpn: %.4f' % timers['train-drl-rpn'].get_avg())
-            print("\n##### DRL-RPN BATCH GRADIENT UPDATE - DONE ###### \n")
+        if (iter + 1) % cfg.DRL_RPN_TRAIN.BATCH_SIZE == 0:
+          print("\n##### DRL-RPN BATCH GRADIENT UPDATE - START ##### \n")
+          print('iter: %d / %d' % (iter + 1, max_iters))
+          print('lr-rl: %f' % lr_rl)
+          timers['train-drl-rpn'].tic()
+          self.net.train_drl_rpn(sess, lr_rl, sc, stats) # apply grad
+          timers['train-drl-rpn'].toc()
+          sc.print_stats()
+          print('TIMINGS:')
+          print('runnn-drl-rpn: %.4f' % timers['run-drl-rpn'].get_avg())
+          print('train-drl-rpn: %.4f' % timers['train-drl-rpn'].get_avg())
+          print("\n##### DRL-RPN BATCH GRADIENT UPDATE - DONE ###### \n")
 
-            # Also sample new beta for next batch
-            beta_idx += 1
-            beta_idx %= len(betas)
-            beta = betas[beta_idx]
-          else:
-            sc.update(0, stats)
-
-          # At this point we assume that an RL-trajectory has been performed.
-          # We next train detector with drl-RPN running in deterministic mode.
-          # Potentially train detector component of network
-          if cfg.DRL_RPN_TRAIN.DET_START >= 0 and \
-            iter >= cfg.DRL_RPN_TRAIN.DET_START:
-
-            # Run drl-RPN in deterministic mode
-            net_conv, rois_drl_rpn, gt_boxes, im_info, timers, _ \
-              = run_drl_rpn(sess, self.net, blobs, timers, mode='train_det',
-                            beta=beta, im_idx=None)
-
-            # Learning rate
-            if (iter + 1) % cfg.TRAIN.STEPSIZE[0] == 0 and fnum == 0:
-              lr_det *= cfg.TRAIN.GAMMA
-              sess.run(tf.assign(lr_det_op, lr_det))
-
-            timer.tic()
-            # Train detector part
-            loss_cls, loss_box, tot_loss \
-              = self.net.train_step_det(sess, train_op, net_conv, rois_drl_rpn,
-                                        gt_boxes, im_info)
-            timer.toc()
-
-            # Display training information
-            self._print_det_loss(iter, max_iters, tot_loss, loss_cls, loss_box,
-                                lr_det, timer)
-    
-        # Train post-hist module AFTER we have trained rest of drl-RPN! Specifically
-        # once rest of drl-RPN has been trained already, copy those weights into
-        # the folder of pretrained weights and rerun training with those as initial
-        # weights, which will then train only the posterior-history module
-        else:
-
-          # The very first time we need to assign the ordinary detector weights
-          # as starting point
-          if iter == 0 and fnum == 0:
-            self.net.assign_post_hist_weights(sess)
-
-          # Sample beta
-          beta = betas[beta_idx]
+          # Also sample new beta for next batch
           beta_idx += 1
           beta_idx %= len(betas)
+          beta = betas[beta_idx]
+        else:
+	        sc.update(0, stats)
+
+        # At this point we assume that an RL-trajectory has been performed.
+        # We next train detector with drl-RPN running in deterministic mode.
+        # Potentially train detector component of network
+        if cfg.DRL_RPN_TRAIN.DET_START >= 0 and \
+          iter >= cfg.DRL_RPN_TRAIN.DET_START:
 
           # Run drl-RPN in deterministic mode
-          net_conv, rois_drl_rpn, gt_boxes, im_info, timers, cls_hist \
+          net_conv, rois_drl_rpn, gt_boxes, im_info, timers, _ \
             = run_drl_rpn(sess, self.net, blobs, timers, mode='train_det',
                           beta=beta, im_idx=None)
 
-          # Learning rate (assume only one learning rate iter for now!)
-          if (iter + 1) % cfg.DRL_RPN_TRAIN.POST_SS[0] == 0 and fnum == 0:
-            lr_post *= cfg.TRAIN.GAMMA
-            sess.run(tf.assign(lr_post_op, lr_post))
+          # Learning rate
+          if (iter + 1) % cfg.TRAIN.STEPSIZE[0] == 0:
+            lr_det *= cfg.TRAIN.GAMMA
+            sess.run(tf.assign(lr_det_op, lr_det))
 
-          # Train post-hist detector part
-          tot_loss = self.net.train_step_post(sess, train_op_post, net_conv,
-                                              rois_drl_rpn, gt_boxes, im_info,
-                                              cls_hist)
+          timer.tic()
+          # Train detector part
+          loss_cls, loss_box, tot_loss \
+            = self.net.train_step_det(sess, train_op, net_conv, rois_drl_rpn,
+                                      gt_boxes, im_info)
+          timer.toc()
 
           # Display training information
-          self._print_det_loss(iter, max_iters, tot_loss, None, None,
-                              lr_post, timer, 'post-hist')
+          self._print_det_loss(iter, max_iters, tot_loss, loss_cls, loss_box,
+                               lr_det, timer)
+   
+      # Train post-hist module AFTER we have trained rest of drl-RPN! Specifically
+      # once rest of drl-RPN has been trained already, copy those weights into
+      # the folder of pretrained weights and rerun training with those as initial
+      # weights, which will then train only the posterior-history module
+      else:
 
-        # Snapshotting
-        if (iter + 1) % cfg.TRAIN.SNAPSHOT_ITERS == 0 and fnum == 0:
-          last_snapshot_iter = iter + 1
-          ss_path, np_path = self.snapshot(sess, iter + 1 + snapshot_add)
-          np_paths.append(np_path)
-          ss_paths.append(ss_path)
+        # The very first time we need to assign the ordinary detector weights
+        # as starting point
+        if iter == 0:
+          self.net.assign_post_hist_weights(sess)
 
-          # Remove the old snapshots if there are too many
-          if len(np_paths) > cfg.TRAIN.SNAPSHOT_KEPT:
-            self.remove_snapshot(np_paths, ss_paths)
+        # Sample beta
+        beta = betas[beta_idx]
+        beta_idx += 1
+        beta_idx %= len(betas)
+
+        # Run drl-RPN in deterministic mode
+        net_conv, rois_drl_rpn, gt_boxes, im_info, timers, cls_hist \
+          = run_drl_rpn(sess, self.net, blobs, timers, mode='train_det',
+                        beta=beta, im_idx=None)
+
+        # Learning rate (assume only one learning rate iter for now!)
+        if (iter + 1) % cfg.DRL_RPN_TRAIN.POST_SS[0] == 0:
+          lr_post *= cfg.TRAIN.GAMMA
+          sess.run(tf.assign(lr_post_op, lr_post))
+
+        # Train post-hist detector part
+        tot_loss = self.net.train_step_post(sess, train_op_post, net_conv,
+                                            rois_drl_rpn, gt_boxes, im_info,
+                                            cls_hist)
+
+        # Display training information
+        self._print_det_loss(iter, max_iters, tot_loss, None, None,
+                             lr_post, timer, 'post-hist')
+
+      # Snapshotting
+      if (iter + 1) % cfg.TRAIN.SNAPSHOT_ITERS == 0:
+        last_snapshot_iter = iter + 1
+        ss_path, np_path = self.snapshot(sess, iter + 1 + snapshot_add)
+        np_paths.append(np_path)
+        ss_paths.append(ss_path)
+
+        # Remove the old snapshots if there are too many
+        if len(np_paths) > cfg.TRAIN.SNAPSHOT_KEPT:
+          self.remove_snapshot(np_paths, ss_paths)
 
       # Increase iteration counter
       iter += 1
@@ -502,7 +497,10 @@ def train_net(network, imdb, roidb, valroidb, output_dir,
   valroidb = filter_roidb(valroidb)
 
   tfconfig = tf.ConfigProto(allow_soft_placement=True)
+  # added because cudnn & cublas fail:
   tfconfig.gpu_options.allow_growth = True
+  tfconfig.gpu_options.allocator_type = 'BFC'
+  tfconfig.gpu_options.per_process_gpu_memory_fraction = 0.8 
 
   with tf.Session(config=tfconfig) as sess:
     sw = SolverWrapper(sess, network, imdb, roidb, valroidb, output_dir,
